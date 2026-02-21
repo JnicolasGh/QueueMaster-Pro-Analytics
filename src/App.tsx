@@ -29,9 +29,30 @@ import { generateSyntheticData } from './utils/dataGenerator';
 
 // --- Constants & Defaults ---
 const DEFAULT_CATEGORIES: Category[] = [
-  { id: '1', name: 'General', prefix: 'G', color: '#3b82f6' },
-  { id: '2', name: 'Preferencial', prefix: 'P', color: '#ef4444' },
-  { id: '3', name: 'Caja', prefix: 'C', color: '#10b981' },
+  { 
+    id: '1', name: 'General', prefix: 'G', color: '#3b82f6',
+    subCategories: [
+      { id: '1-1', name: 'Información General' },
+      { id: '1-2', name: 'Entrega de Documentos' },
+      { id: '1-3', name: 'Reclamos' }
+    ]
+  },
+  { 
+    id: '2', name: 'Preferencial', prefix: 'P', color: '#ef4444',
+    subCategories: [
+      { id: '2-1', name: 'Adulto Mayor' },
+      { id: '2-2', name: 'Discapacidad' },
+      { id: '2-3', name: 'Embarazo' }
+    ]
+  },
+  { 
+    id: '3', name: 'Caja', prefix: 'C', color: '#10b981',
+    subCategories: [
+      { id: '3-1', name: 'Pagos' },
+      { id: '3-2', name: 'Retiros' },
+      { id: '3-3', name: 'Consultas' }
+    ]
+  },
 ];
 
 const DEFAULT_COUNTERS: Counter[] = [
@@ -55,13 +76,25 @@ export default function App() {
     };
   });
 
+  const [dbConfig, setDbConfig] = useState<{ usePostgres: boolean, connectionString?: string }>({ usePostgres: false });
+
+  // Load config and tickets from backend
+  useEffect(() => {
+    fetch('/api/config').then(res => res.json()).then(setDbConfig);
+    fetch('/api/tickets').then(res => res.json()).then(tickets => {
+      if (tickets && tickets.length > 0) {
+        setState(prev => ({ ...prev, tickets }));
+      }
+    });
+  }, []);
+
   // Persist state
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
   // --- Actions ---
-  const createTicket = (categoryId: string) => {
+  const createTicket = (categoryId: string, customerDocument?: string) => {
     const category = state.categories.find(c => c.id === categoryId);
     if (!category) return;
 
@@ -70,6 +103,7 @@ export default function App() {
       id: crypto.randomUUID(),
       displayId: `${category.prefix}${String(num).padStart(3, '0')}`,
       categoryId,
+      customerDocument,
       status: 'waiting',
       createdAt: Date.now(),
     };
@@ -82,12 +116,26 @@ export default function App() {
         [categoryId]: num + 1
       }
     }));
+
+    // Sync with backend
+    fetch('/api/tickets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newTicket)
+    });
     
     return newTicket;
   };
 
+  const updateTicketOnBackend = (id: string, updates: Partial<Ticket>) => {
+    fetch(`/api/tickets/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+  };
+
   const callNextTicket = (counterId: number) => {
-    // Simple priority: Preferencial first, then oldest
     const waitingTickets = state.tickets
       .filter(t => t.status === 'waiting')
       .sort((a, b) => {
@@ -116,31 +164,47 @@ export default function App() {
           : c
       )
     }));
+
+    updateTicketOnBackend(ticket.id, { status: 'calling', calledAt: now, counterId });
   };
 
   const startServing = (counterId: number) => {
     const counter = state.counters.find(c => c.id === counterId);
     if (!counter?.currentTicketId) return;
 
+    const now = Date.now();
     setState(prev => ({
       ...prev,
       tickets: prev.tickets.map(t => 
         t.id === counter.currentTicketId 
-          ? { ...t, status: 'serving', startedAt: Date.now() } 
+          ? { ...t, status: 'serving', startedAt: now } 
           : t
       )
     }));
+
+    updateTicketOnBackend(counter.currentTicketId, { status: 'serving', startedAt: now });
+  };
+
+  const reprofileTicket = (ticketId: string, subCategoryId: string) => {
+    setState(prev => ({
+      ...prev,
+      tickets: prev.tickets.map(t => 
+        t.id === ticketId ? { ...t, subCategoryId } : t
+      )
+    }));
+    updateTicketOnBackend(ticketId, { subCategoryId });
   };
 
   const completeTicket = (counterId: number, status: 'completed' | 'no-show') => {
     const counter = state.counters.find(c => c.id === counterId);
     if (!counter?.currentTicketId) return;
 
+    const now = Date.now();
     setState(prev => ({
       ...prev,
       tickets: prev.tickets.map(t => 
         t.id === counter.currentTicketId 
-          ? { ...t, status, completedAt: Date.now() } 
+          ? { ...t, status, completedAt: now } 
           : t
       ),
       counters: prev.counters.map(c => 
@@ -149,6 +213,25 @@ export default function App() {
           : c
       )
     }));
+
+    updateTicketOnBackend(counter.currentTicketId, { status, completedAt: now });
+  };
+
+  const saveDbConfig = (config: typeof dbConfig) => {
+    fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    }).then(() => setDbConfig(config));
+  };
+
+  const setupDb = () => {
+    fetch('/api/setup-db', { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) alert(data.error);
+        else alert("Base de datos configurada correctamente");
+      });
   };
 
   const generateData = () => {
@@ -198,9 +281,11 @@ export default function App() {
               key="advisor" 
               counters={state.counters} 
               tickets={state.tickets}
+              categories={state.categories}
               onCall={callNextTicket}
               onStart={startServing}
               onComplete={completeTicket}
+              onReprofile={reprofileTicket}
             />
           )}
           {view === 'tv' && <TVView key="tv" tickets={state.tickets} counters={state.counters} />}
@@ -209,6 +294,9 @@ export default function App() {
               key="admin" 
               state={state} 
               setState={setState} 
+              dbConfig={dbConfig}
+              onSaveConfig={saveDbConfig}
+              onSetupDb={setupDb}
               onGenerateSynth={generateData}
               onClear={clearData}
             />
@@ -222,13 +310,19 @@ export default function App() {
 
 // --- Sub-Views ---
 
-function KioskView({ categories, onIssue }: { categories: Category[], onIssue: (id: string) => void, key?: React.Key }) {
+function KioskView({ categories, onIssue }: { categories: Category[], onIssue: (id: string, doc?: string) => void, key?: React.Key }) {
   const [lastTicket, setLastTicket] = useState<Ticket | null>(null);
+  const [document, setDocument] = useState('');
+  const [step, setStep] = useState<'id' | 'category'>('id');
 
   const handleIssue = (id: string) => {
-    const ticket = (onIssue as any)(id);
+    const ticket = (onIssue as any)(id, document);
     setLastTicket(ticket);
-    setTimeout(() => setLastTicket(null), 1000);
+    setTimeout(() => {
+      setLastTicket(null);
+      setStep('id');
+      setDocument('');
+    }, 2000);
   };
 
   return (
@@ -244,28 +338,56 @@ function KioskView({ categories, onIssue }: { categories: Category[], onIssue: (
             <TicketIcon className="text-white" size={40} />
           </div>
           <h1 className="text-4xl font-bold tracking-tight text-slate-900">Bienvenido</h1>
-          <p className="text-slate-500 text-lg">Seleccione el tipo de trámite para obtener su turno</p>
+          <p className="text-slate-500 text-lg">
+            {step === 'id' ? 'Por favor ingrese su documento de identidad' : 'Seleccione el tipo de trámite'}
+          </p>
         </header>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          {categories.map(cat => (
-            <button
-              key={cat.id}
-              onClick={() => handleIssue(cat.id)}
-              className="group relative overflow-hidden bg-white p-8 rounded-3xl border border-slate-200 shadow-sm hover:shadow-xl hover:border-blue-200 transition-all text-left"
+        {step === 'id' ? (
+          <div className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm space-y-6 max-w-md mx-auto">
+            <input 
+              type="text" 
+              placeholder="Número de Documento" 
+              className="w-full px-6 py-4 text-2xl font-bold rounded-2xl border border-slate-200 focus:ring-4 focus:ring-blue-100 outline-none text-center"
+              value={document}
+              onChange={e => setDocument(e.target.value)}
+            />
+            <button 
+              disabled={!document}
+              onClick={() => setStep('category')}
+              className="w-full bg-blue-600 text-white font-bold py-4 rounded-2xl hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2 text-xl"
             >
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ backgroundColor: `${cat.color}15`, color: cat.color }}>
-                  <TicketIcon size={24} />
-                </div>
-                <ArrowRight className="text-slate-300 group-hover:text-blue-500 transition-colors" />
-              </div>
-              <h3 className="text-xl font-bold text-slate-800">{cat.name}</h3>
-              <p className="text-slate-400 text-sm mt-1">Prefijo: {cat.prefix}</p>
-              <div className="absolute bottom-0 left-0 h-1 w-0 group-hover:w-full transition-all duration-500" style={{ backgroundColor: cat.color }} />
+              Continuar
+              <ArrowRight size={24} />
             </button>
-          ))}
-        </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            {categories.map(cat => (
+              <button
+                key={cat.id}
+                onClick={() => handleIssue(cat.id)}
+                className="group relative overflow-hidden bg-white p-8 rounded-3xl border border-slate-200 shadow-sm hover:shadow-xl hover:border-blue-200 transition-all text-left"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ backgroundColor: `${cat.color}15`, color: cat.color }}>
+                    <TicketIcon size={24} />
+                  </div>
+                  <ArrowRight className="text-slate-300 group-hover:text-blue-500 transition-colors" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-800">{cat.name}</h3>
+                <p className="text-slate-400 text-sm mt-1">Prefijo: {cat.prefix}</p>
+                <div className="absolute bottom-0 left-0 h-1 w-0 group-hover:w-full transition-all duration-500" style={{ backgroundColor: cat.color }} />
+              </button>
+            ))}
+            <button 
+              onClick={() => setStep('id')}
+              className="sm:col-span-2 text-slate-400 hover:text-slate-600 font-medium"
+            >
+              ← Volver a ingresar documento
+            </button>
+          </div>
+        )}
 
         <AnimatePresence>
           {lastTicket && (
@@ -282,6 +404,9 @@ function KioskView({ categories, onIssue }: { categories: Category[], onIssue: (
                 <div>
                   <p className="text-slate-400 uppercase tracking-widest text-xs font-bold">Su Turno es</p>
                   <h2 className="text-7xl font-black text-slate-900 tracking-tighter">{lastTicket.displayId}</h2>
+                  {lastTicket.customerDocument && (
+                    <p className="text-slate-400 text-sm mt-2">ID: {lastTicket.customerDocument}</p>
+                  )}
                 </div>
                 <p className="text-slate-500 text-sm">Por favor, espere a ser llamado en la pantalla principal.</p>
                 <div className="pt-4">
@@ -289,7 +414,7 @@ function KioskView({ categories, onIssue }: { categories: Category[], onIssue: (
                     <motion.div 
                       initial={{ width: '100%' }}
                       animate={{ width: '0%' }}
-                      transition={{ duration: 5, ease: 'linear' }}
+                      transition={{ duration: 2, ease: 'linear' }}
                       className="h-full bg-blue-500"
                     />
                   </div>
@@ -303,12 +428,14 @@ function KioskView({ categories, onIssue }: { categories: Category[], onIssue: (
   );
 }
 
-function AdvisorView({ counters, tickets, onCall, onStart, onComplete }: { 
+function AdvisorView({ counters, tickets, categories, onCall, onStart, onComplete, onReprofile }: { 
   counters: Counter[], 
   tickets: Ticket[],
+  categories: Category[],
   onCall: (id: number) => void,
   onStart: (id: number) => void,
   onComplete: (id: number, status: 'completed' | 'no-show') => void,
+  onReprofile: (ticketId: string, subCategoryId: string) => void,
   key?: React.Key
 }) {
   const [selectedCounterId, setSelectedCounterId] = useState<number | null>(null);
@@ -316,6 +443,8 @@ function AdvisorView({ counters, tickets, onCall, onStart, onComplete }: {
   const activeCounter = counters.find(c => c.id === selectedCounterId);
   const activeTicket = tickets.find(t => t.id === activeCounter?.currentTicketId);
   const waitingCount = tickets.filter(t => t.status === 'waiting').length;
+
+  const currentCategory = categories.find(c => c.id === activeTicket?.categoryId);
 
   return (
     <motion.div 
@@ -386,7 +515,35 @@ function AdvisorView({ counters, tickets, onCall, onStart, onComplete }: {
                     <div className="space-y-2">
                       <p className="text-slate-400 uppercase tracking-widest text-xs font-bold">Atendiendo ahora</p>
                       <h2 className="text-8xl font-black text-slate-900 tracking-tighter">{activeTicket.displayId}</h2>
+                      {activeTicket.customerDocument && (
+                        <p className="text-blue-600 font-bold text-xl">Documento: {activeTicket.customerDocument}</p>
+                      )}
                     </div>
+
+                    {/* Re-profiling Section */}
+                    {activeTicket.status === 'serving' && currentCategory?.subCategories && (
+                      <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 text-left space-y-4">
+                        <h4 className="font-bold text-slate-700 flex items-center gap-2">
+                          <Settings size={18} />
+                          Tipificación de Atención
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {currentCategory.subCategories.map(sub => (
+                            <button
+                              key={sub.id}
+                              onClick={() => onReprofile(activeTicket.id, sub.id)}
+                              className={`px-4 py-3 rounded-xl border font-medium transition-all text-sm ${
+                                activeTicket.subCategoryId === sub.id 
+                                  ? 'bg-blue-600 border-blue-600 text-white shadow-md' 
+                                  : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'
+                              }`}
+                            >
+                              {sub.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     
                     <div className="flex flex-wrap justify-center gap-4">
                       {activeTicket.status === 'calling' && (
@@ -448,7 +605,10 @@ function AdvisorView({ counters, tickets, onCall, onStart, onComplete }: {
               <div className="space-y-3">
                 {tickets.filter(t => t.status === 'waiting').slice(0, 5).map(t => (
                   <div key={t.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <span className="font-bold text-slate-700">{t.displayId}</span>
+                    <div className="flex flex-col">
+                      <span className="font-bold text-slate-700">{t.displayId}</span>
+                      {t.customerDocument && <span className="text-[10px] text-slate-400">ID: {t.customerDocument}</span>}
+                    </div>
                     <span className="text-xs text-slate-400 font-medium">{format(t.createdAt, 'HH:mm')}</span>
                   </div>
                 ))}
@@ -590,21 +750,29 @@ function TVView({ tickets, counters }: { tickets: Ticket[], counters: Counter[],
   );
 }
 
-function AdminView({ state, setState, onGenerateSynth, onClear }: { 
+function AdminView({ state, setState, dbConfig, onSaveConfig, onSetupDb, onGenerateSynth, onClear }: { 
   state: AppState, 
   setState: React.Dispatch<React.SetStateAction<AppState>>,
+  dbConfig: { usePostgres: boolean, connectionString?: string },
+  onSaveConfig: (config: any) => void,
+  onSetupDb: () => void,
   onGenerateSynth: () => void,
   onClear: () => void,
   key?: React.Key
 }) {
   const [newCat, setNewCat] = useState({ name: '', prefix: '', color: '#3b82f6' });
+  const [localDbConfig, setLocalDbConfig] = useState(dbConfig);
+
+  useEffect(() => {
+    setLocalDbConfig(dbConfig);
+  }, [dbConfig]);
 
   const addCategory = () => {
     if (!newCat.name || !newCat.prefix) return;
     const id = crypto.randomUUID();
     setState(prev => ({
       ...prev,
-      categories: [...prev.categories, { ...newCat, id }],
+      categories: [...prev.categories, { ...newCat, id, subCategories: [] }],
       nextTicketNumber: { ...prev.nextTicketNumber, [id]: 1 }
     }));
     setNewCat({ name: '', prefix: '', color: '#3b82f6' });
@@ -625,8 +793,57 @@ function AdminView({ state, setState, onGenerateSynth, onClear }: {
     >
       <header>
         <h1 className="text-3xl font-bold text-slate-900">Configuración del Sistema</h1>
-        <p className="text-slate-500">Administre categorías, ventanillas y datos del sistema</p>
+        <p className="text-slate-500">Administre categorías, ventanillas y base de datos</p>
       </header>
+
+      {/* Database Configuration */}
+      <section className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm space-y-6">
+        <h3 className="text-xl font-bold flex items-center gap-2">
+          <Monitor className="text-blue-500" />
+          Conexión a Base de Datos (PostgreSQL)
+        </h3>
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <input 
+              type="checkbox" 
+              id="usePostgres"
+              checked={localDbConfig.usePostgres}
+              onChange={e => setLocalDbConfig({ ...localDbConfig, usePostgres: e.target.checked })}
+              className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+            <label htmlFor="usePostgres" className="font-medium text-slate-700">Usar PostgreSQL como backend</label>
+          </div>
+          
+          {localDbConfig.usePostgres && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-slate-500 uppercase tracking-widest">Connection String</label>
+                <input 
+                  type="text" 
+                  placeholder="postgres://user:pass@host:port/db" 
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm"
+                  value={localDbConfig.connectionString || ''}
+                  onChange={e => setLocalDbConfig({ ...localDbConfig, connectionString: e.target.value })}
+                />
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => onSaveConfig(localDbConfig)}
+                  className="px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all"
+                >
+                  Guardar Configuración
+                </button>
+                <button 
+                  onClick={onSetupDb}
+                  className="px-6 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-all"
+                >
+                  Inicializar Tablas
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
 
       <section className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm space-y-6">
         <h3 className="text-xl font-bold flex items-center gap-2">

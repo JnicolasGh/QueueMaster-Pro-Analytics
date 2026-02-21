@@ -6,6 +6,12 @@ export interface Category {
   name: string;
   prefix: string;
   color: string;
+  subCategories?: SubCategory[];
+}
+
+export interface SubCategory {
+  id: string;
+  name: string;
 }
 
 export interface Counter {
@@ -19,6 +25,8 @@ export interface Ticket {
   id: string;
   displayId: string;
   categoryId: string;
+  subCategoryId?: string;
+  customerDocument?: string;
   status: TicketStatus;
   createdAt: number;
   calledAt?: number;

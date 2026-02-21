@@ -1,0 +1,6 @@
+docker run --name queuemaster-postgres `
+  -e POSTGRES_USER=queuemaster `
+  -e POSTGRES_PASSWORD=queuemaster123 `
+  -e POSTGRES_DB=queuemaster_db `
+  -p 5432:5432 `
+  -d postgres:16
