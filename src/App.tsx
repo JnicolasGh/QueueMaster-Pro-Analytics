@@ -17,40 +17,53 @@ import {
   ArrowRight,
   Plus,
   Trash2,
-  Volume2
+  Volume2,
+  Lock,
+  LogOut,
+  ShieldCheck,
+  UserPlus,
+  UserMinus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend 
 } from 'recharts';
 import { format, differenceInMinutes, startOfDay, subDays, isWithinInterval } from 'date-fns';
-import { Category, Counter, Ticket, AppState, TicketStatus } from './types';
+import { Category, Counter, Ticket, AppState, TicketStatus, User, UserRole } from './types';
 import { generateSyntheticData } from './utils/dataGenerator';
 
 // --- Constants & Defaults ---
 const DEFAULT_CATEGORIES: Category[] = [
   { 
-    id: '1', name: 'General', prefix: 'G', color: '#3b82f6',
+    id: '1', name: 'Servicio al Cliente', prefix: 'S', color: '#3b82f6',
     subCategories: [
-      { id: '1-1', name: 'Información General' },
-      { id: '1-2', name: 'Entrega de Documentos' },
-      { id: '1-3', name: 'Reclamos' }
+      { id: '1-1', name: 'sub_servicio_1' },
+      { id: '1-2', name: 'sub_servicio_2' },
+      { id: '1-3', name: 'sub_servicio_3' }
     ]
   },
   { 
     id: '2', name: 'Preferencial', prefix: 'P', color: '#ef4444',
     subCategories: [
-      { id: '2-1', name: 'Adulto Mayor' },
-      { id: '2-2', name: 'Discapacidad' },
-      { id: '2-3', name: 'Embarazo' }
+      { id: '2-1', name: 'sub_preferencial_1' },
+      { id: '2-2', name: 'sub_preferencial_2' },
+      { id: '2-3', name: 'sub_preferencial_3' }
     ]
   },
   { 
-    id: '3', name: 'Caja', prefix: 'C', color: '#10b981',
+    id: '3', name: 'Caja y Pagos', prefix: 'C', color: '#10b981',
     subCategories: [
-      { id: '3-1', name: 'Pagos' },
-      { id: '3-2', name: 'Retiros' },
-      { id: '3-3', name: 'Consultas' }
+      { id: '3-1', name: 'sub_caja_1' },
+      { id: '3-2', name: 'sub_caja_2' },
+      { id: '3-3', name: 'sub_caja_3' }
+    ]
+  },
+  { 
+    id: '4', name: 'Asesoría Comercial', prefix: 'A', color: '#8b5cf6',
+    subCategories: [
+      { id: '4-1', name: 'sub_comercial_1' },
+      { id: '4-2', name: 'sub_comercial_2' },
+      { id: '4-3', name: 'sub_comercial_3' }
     ]
   },
 ];
@@ -62,36 +75,58 @@ const DEFAULT_COUNTERS: Counter[] = [
 ];
 
 const STORAGE_KEY = 'queuemaster_state';
+const AUTH_KEY = 'queuemaster_user';
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem(AUTH_KEY);
+    return saved ? JSON.parse(saved) : null;
+  });
   const [view, setView] = useState<'kiosk' | 'advisor' | 'tv' | 'admin' | 'analytics'>('kiosk');
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // Migration: Ensure all categories have subCategories array
+      parsed.categories = parsed.categories.map((c: any) => ({
+        ...c,
+        subCategories: c.subCategories || []
+      }));
+      return parsed;
+    }
     return {
       categories: DEFAULT_CATEGORIES,
       counters: DEFAULT_COUNTERS,
       tickets: [],
-      nextTicketNumber: { '1': 1, '2': 1, '3': 1 }
+      nextTicketNumber: { '1': 1, '2': 1, '3': 1, '4': 1 }
     };
   });
 
   const [dbConfig, setDbConfig] = useState<{ usePostgres: boolean, connectionString?: string }>({ usePostgres: false });
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  // Load config and tickets from backend
+  // Load config from backend
   useEffect(() => {
     fetch('/api/config').then(res => res.json()).then(setDbConfig);
-    fetch('/api/tickets').then(res => res.json()).then(tickets => {
-      if (tickets && tickets.length > 0) {
-        setState(prev => ({ ...prev, tickets }));
-      }
-    });
   }, []);
 
   // Persist state
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
+
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem(AUTH_KEY, JSON.stringify(user));
+      // Set default view based on role
+      if (user.role === 'kiosk') setView('kiosk');
+      else if (user.role === 'display') setView('tv');
+      else if (user.role === 'advisor') setView('advisor');
+      else if (user.role === 'admin') setView('admin');
+    } else {
+      localStorage.removeItem(AUTH_KEY);
+    }
+  }, [user]);
 
   // --- Actions ---
   const createTicket = (categoryId: string, customerDocument?: string) => {
@@ -240,6 +275,21 @@ export default function App() {
       ...prev,
       tickets: [...prev.tickets, ...synthetic]
     }));
+    
+    setIsSyncing(true);
+    // Bulk sync with backend
+    fetch('/api/tickets/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(synthetic)
+    }).then(res => res.json()).then(data => {
+      setIsSyncing(false);
+      if (data.error) alert("Error al sincronizar con DB: " + data.error);
+      else alert(`Sincronización exitosa: ${data.count} turnos registrados en PostgreSQL.`);
+    }).catch(err => {
+      setIsSyncing(false);
+      console.error(err);
+    });
   };
 
   const clearData = () => {
@@ -249,16 +299,6 @@ export default function App() {
   };
 
   // --- Components ---
-
-  const Navigation = () => (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-2 flex justify-around items-center z-50 md:relative md:border-t-0 md:border-r md:w-20 md:flex-col md:h-screen md:py-8">
-      <NavButton icon={<TicketIcon size={24} />} label="Kiosco" active={view === 'kiosk'} onClick={() => setView('kiosk')} />
-      <NavButton icon={<UserRound size={24} />} label="Asesor" active={view === 'advisor'} onClick={() => setView('advisor')} />
-      <NavButton icon={<Monitor size={24} />} label="TV" active={view === 'tv'} onClick={() => setView('tv')} />
-      <NavButton icon={<LayoutDashboard size={24} />} label="Analytics" active={view === 'analytics'} onClick={() => setView('analytics')} />
-      <NavButton icon={<Settings size={24} />} label="Admin" active={view === 'admin'} onClick={() => setView('admin')} />
-    </nav>
-  );
 
   const NavButton = ({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) => (
     <button 
@@ -270,13 +310,63 @@ export default function App() {
     </button>
   );
 
+  const DbStatus = () => (
+    <div className="hidden md:flex flex-col items-center gap-1 mt-auto mb-4">
+      <div className={`w-3 h-3 rounded-full ${dbConfig.usePostgres ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-slate-300'}`} />
+      <span className="text-[8px] font-bold uppercase text-slate-400">DB</span>
+    </div>
+  );
+
+  if (!user) {
+    return <LoginView onLogin={setUser} />;
+  }
+
+  const allowedViews = {
+    admin: ['kiosk', 'advisor', 'tv', 'admin'],
+    advisor: ['advisor'],
+    kiosk: ['kiosk'],
+    display: ['tv']
+  }[user.role] || [];
+
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row font-sans text-slate-900">
-      <Navigation />
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-2 flex justify-around items-center z-50 md:relative md:border-t-0 md:border-r md:w-20 md:flex-col md:h-screen md:py-8">
+        <div className="hidden md:flex flex-col items-center gap-4 mb-8">
+          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-100">
+            <TicketIcon size={20} />
+          </div>
+        </div>
+
+        <div className="flex flex-row md:flex-col gap-2 md:gap-6">
+          {allowedViews.includes('kiosk') && (
+            <NavButton icon={<Monitor size={24} />} label="Kiosco" active={view === 'kiosk'} onClick={() => setView('kiosk')} />
+          )}
+          {allowedViews.includes('advisor') && (
+            <NavButton icon={<UserRound size={24} />} label="Asesor" active={view === 'advisor'} onClick={() => setView('advisor')} />
+          )}
+          {allowedViews.includes('tv') && (
+            <NavButton icon={<Volume2 size={24} />} label="TV" active={view === 'tv'} onClick={() => setView('tv')} />
+          )}
+          {allowedViews.includes('admin') && (
+            <NavButton icon={<Settings size={24} />} label="Admin" active={view === 'admin'} onClick={() => setView('admin')} />
+          )}
+        </div>
+
+        <div className="flex flex-col items-center gap-4 mt-auto mb-4">
+          <DbStatus />
+          <button 
+            onClick={() => setUser(null)}
+            className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+            title="Cerrar Sesión"
+          >
+            <LogOut size={20} />
+          </button>
+        </div>
+      </nav>
       <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
         <AnimatePresence mode="wait">
-          {view === 'kiosk' && <KioskView key="kiosk" categories={state.categories} onIssue={createTicket} />}
-          {view === 'advisor' && (
+          {view === 'kiosk' && allowedViews.includes('kiosk') && <KioskView key="kiosk" categories={state.categories} onIssue={createTicket} />}
+          {view === 'advisor' && allowedViews.includes('advisor') && (
             <AdvisorView 
               key="advisor" 
               counters={state.counters} 
@@ -288,20 +378,20 @@ export default function App() {
               onReprofile={reprofileTicket}
             />
           )}
-          {view === 'tv' && <TVView key="tv" tickets={state.tickets} counters={state.counters} />}
-          {view === 'admin' && (
+          {view === 'tv' && allowedViews.includes('tv') && <TVView key="tv" tickets={state.tickets} counters={state.counters} />}
+          {view === 'admin' && allowedViews.includes('admin') && (
             <AdminView 
               key="admin" 
               state={state} 
               setState={setState} 
               dbConfig={dbConfig}
+              isSyncing={isSyncing}
               onSaveConfig={saveDbConfig}
               onSetupDb={setupDb}
               onGenerateSynth={generateData}
               onClear={clearData}
             />
           )}
-          {view === 'analytics' && <AnalyticsView key="analytics" tickets={state.tickets} categories={state.categories} />}
         </AnimatePresence>
       </main>
     </div>
@@ -309,6 +399,119 @@ export default function App() {
 }
 
 // --- Sub-Views ---
+
+function LoginView({ onLogin }: { onLogin: (user: User) => void }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      if (res.ok) {
+        const user = await res.json();
+        onLogin(user);
+      } else {
+        const data = await res.json();
+        setError(data.error || 'Error al iniciar sesión');
+      }
+    } catch (err) {
+      setError('Error de conexión con el servidor');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-md bg-white rounded-[40px] p-10 shadow-2xl space-y-8"
+      >
+        <div className="text-center space-y-4">
+          <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center text-white mx-auto shadow-xl shadow-blue-200">
+            <ShieldCheck size={40} />
+          </div>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">QueueMaster Pro</h1>
+          <p className="text-slate-400 font-medium">Inicie sesión para acceder al sistema</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Usuario</label>
+              <div className="relative">
+                <UserRound className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                <input 
+                  type="text" 
+                  required
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium"
+                  placeholder="ej. admin"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Contraseña</label>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                <input 
+                  type="password" 
+                  required
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium"
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
+          </div>
+
+          {error && (
+            <motion.p 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-red-500 text-sm font-bold text-center bg-red-50 py-3 rounded-xl border border-red-100"
+            >
+              {error}
+            </motion.p>
+          )}
+
+          <button 
+            type="submit"
+            disabled={loading}
+            className="w-full py-5 bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all shadow-xl shadow-slate-200 flex items-center justify-center gap-3 disabled:opacity-50"
+          >
+            {loading ? 'Verificando...' : 'Entrar al Sistema'}
+            {!loading && <ArrowRight size={20} />}
+          </button>
+        </form>
+
+        <div className="pt-4 text-center">
+          <p className="text-xs text-slate-300 font-medium">
+            Consulte con el administrador para obtener sus credenciales.
+          </p>
+          <div className="mt-4 flex justify-center gap-4 text-[10px] text-slate-200 font-bold uppercase tracking-tighter">
+            <span>Kiosco</span>
+            <span>Pantallas</span>
+            <span>Ventanilla</span>
+            <span>Admin</span>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
 function KioskView({ categories, onIssue }: { categories: Category[], onIssue: (id: string, doc?: string) => void, key?: React.Key }) {
   const [lastTicket, setLastTicket] = useState<Ticket | null>(null);
@@ -457,11 +660,20 @@ function AdvisorView({ counters, tickets, categories, onCall, onStart, onComplet
           <h1 className="text-3xl font-bold text-slate-900">Panel del Asesor</h1>
           <p className="text-slate-500">Gestione la atención de clientes en su ventanilla</p>
         </div>
-        <div className="flex items-center gap-3 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
-          <div className="px-4 py-2 bg-blue-50 text-blue-700 rounded-xl flex items-center gap-2">
-            <Users size={18} />
-            <span className="font-bold">{waitingCount}</span>
-            <span className="text-xs font-medium uppercase">En espera</span>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => window.location.reload()} 
+            className="p-2 bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-blue-600 transition-all"
+            title="Refrescar datos"
+          >
+            <Clock size={20} />
+          </button>
+          <div className="flex items-center gap-3 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="px-4 py-2 bg-blue-50 text-blue-700 rounded-xl flex items-center gap-2">
+              <Users size={18} />
+              <span className="font-bold">{waitingCount}</span>
+              <span className="text-xs font-medium uppercase">En espera</span>
+            </div>
           </div>
         </div>
       </header>
@@ -521,27 +733,34 @@ function AdvisorView({ counters, tickets, categories, onCall, onStart, onComplet
                     </div>
 
                     {/* Re-profiling Section */}
-                    {activeTicket.status === 'serving' && currentCategory?.subCategories && (
+                    {(activeTicket.status === 'serving' || activeTicket.status === 'calling') && (
                       <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 text-left space-y-4">
                         <h4 className="font-bold text-slate-700 flex items-center gap-2">
                           <Settings size={18} />
                           Tipificación de Atención
                         </h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {currentCategory.subCategories.map(sub => (
-                            <button
-                              key={sub.id}
-                              onClick={() => onReprofile(activeTicket.id, sub.id)}
-                              className={`px-4 py-3 rounded-xl border font-medium transition-all text-sm ${
-                                activeTicket.subCategoryId === sub.id 
-                                  ? 'bg-blue-600 border-blue-600 text-white shadow-md' 
-                                  : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'
-                              }`}
-                            >
-                              {sub.name}
-                            </button>
-                          ))}
-                        </div>
+                        {currentCategory?.subCategories && currentCategory.subCategories.length > 0 ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {currentCategory.subCategories.map(sub => (
+                              <button
+                                key={sub.id}
+                                onClick={() => onReprofile(activeTicket.id, sub.id)}
+                                className={`px-4 py-3 rounded-xl border font-medium transition-all text-sm ${
+                                  activeTicket.subCategoryId === sub.id 
+                                    ? 'bg-blue-600 border-blue-600 text-white shadow-md' 
+                                    : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'
+                                }`}
+                              >
+                                {sub.name}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="p-4 bg-white border border-dashed border-slate-300 rounded-xl text-center">
+                            <p className="text-slate-400 text-sm">No hay sub-categorías configuradas para esta categoría.</p>
+                            <p className="text-xs text-slate-400 mt-1">Configure las tipificaciones en el panel de Admin.</p>
+                          </div>
+                        )}
                       </div>
                     )}
                     
@@ -750,10 +969,11 @@ function TVView({ tickets, counters }: { tickets: Ticket[], counters: Counter[],
   );
 }
 
-function AdminView({ state, setState, dbConfig, onSaveConfig, onSetupDb, onGenerateSynth, onClear }: { 
+function AdminView({ state, setState, dbConfig, isSyncing, onSaveConfig, onSetupDb, onGenerateSynth, onClear }: { 
   state: AppState, 
   setState: React.Dispatch<React.SetStateAction<AppState>>,
   dbConfig: { usePostgres: boolean, connectionString?: string },
+  isSyncing: boolean,
   onSaveConfig: (config: any) => void,
   onSetupDb: () => void,
   onGenerateSynth: () => void,
@@ -762,6 +982,35 @@ function AdminView({ state, setState, dbConfig, onSaveConfig, onSetupDb, onGener
 }) {
   const [newCat, setNewCat] = useState({ name: '', prefix: '', color: '#3b82f6' });
   const [localDbConfig, setLocalDbConfig] = useState(dbConfig);
+  const [users, setUsers] = useState<User[]>([]);
+  const [newUser, setNewUser] = useState({ username: '', password: '', role: 'advisor' as UserRole, name: '' });
+
+  useEffect(() => {
+    fetch('/api/users').then(res => res.json()).then(setUsers);
+  }, []);
+
+  const handleAddUser = async () => {
+    if (!newUser.username || !newUser.password || !newUser.name) return;
+    const res = await fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newUser)
+    });
+    if (res.ok) {
+      const user = await res.json();
+      setUsers([...users, user]);
+      setNewUser({ username: '', password: '', role: 'advisor', name: '' });
+    }
+  };
+
+  const handleDeleteUser = async (id: string) => {
+    if (confirm('¿Eliminar usuario?')) {
+      const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setUsers(users.filter(u => u.id !== id));
+      }
+    }
+  };
 
   useEffect(() => {
     setLocalDbConfig(dbConfig);
@@ -770,9 +1019,13 @@ function AdminView({ state, setState, dbConfig, onSaveConfig, onSetupDb, onGener
   const addCategory = () => {
     if (!newCat.name || !newCat.prefix) return;
     const id = crypto.randomUUID();
+    const subCategories = [
+      { id: `${id}-1`, name: `sub_${newCat.name.toLowerCase().replace(/\s+/g, '_')}_1` },
+      { id: `${id}-2`, name: `sub_${newCat.name.toLowerCase().replace(/\s+/g, '_')}_2` }
+    ];
     setState(prev => ({
       ...prev,
-      categories: [...prev.categories, { ...newCat, id, subCategories: [] }],
+      categories: [...prev.categories, { ...newCat, id, subCategories }],
       nextTicketNumber: { ...prev.nextTicketNumber, [id]: 1 }
     }));
     setNewCat({ name: '', prefix: '', color: '#3b82f6' });
@@ -793,8 +1046,79 @@ function AdminView({ state, setState, dbConfig, onSaveConfig, onSetupDb, onGener
     >
       <header>
         <h1 className="text-3xl font-bold text-slate-900">Configuración del Sistema</h1>
-        <p className="text-slate-500">Administre categorías, ventanillas y base de datos</p>
+        <p className="text-slate-500">Administre usuarios, categorías y base de datos</p>
       </header>
+
+      {/* User Management */}
+      <section className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm space-y-6">
+        <h3 className="text-xl font-bold flex items-center gap-2">
+          <Users className="text-blue-500" />
+          Gestión de Usuarios
+        </h3>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <input 
+            type="text" 
+            placeholder="Nombre" 
+            className="px-4 py-3 rounded-xl border border-slate-200 text-sm outline-none"
+            value={newUser.name}
+            onChange={e => setNewUser({ ...newUser, name: e.target.value })}
+          />
+          <input 
+            type="text" 
+            placeholder="Usuario" 
+            className="px-4 py-3 rounded-xl border border-slate-200 text-sm outline-none"
+            value={newUser.username}
+            onChange={e => setNewUser({ ...newUser, username: e.target.value })}
+          />
+          <input 
+            type="password" 
+            placeholder="Contraseña" 
+            className="px-4 py-3 rounded-xl border border-slate-200 text-sm outline-none"
+            value={newUser.password}
+            onChange={e => setNewUser({ ...newUser, password: e.target.value })}
+          />
+          <select 
+            className="px-4 py-3 rounded-xl border border-slate-200 text-sm outline-none bg-white"
+            value={newUser.role}
+            onChange={e => setNewUser({ ...newUser, role: e.target.value as UserRole })}
+          >
+            <option value="admin">Admin</option>
+            <option value="advisor">Asesor</option>
+            <option value="kiosk">Kiosco</option>
+            <option value="display">Pantalla</option>
+          </select>
+          <button 
+            onClick={handleAddUser}
+            className="bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
+          >
+            <UserPlus size={20} />
+            Añadir
+          </button>
+        </div>
+
+        <div className="space-y-2 pt-4">
+          {users.map(u => (
+            <div key={u.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-slate-400 border border-slate-100">
+                  <UserRound size={20} />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-800">{u.name} <span className="text-xs font-normal text-slate-400">(@{u.username})</span></p>
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-600 rounded-md text-[10px] font-black uppercase tracking-widest">{u.role}</span>
+                </div>
+              </div>
+              <button 
+                onClick={() => handleDeleteUser(u.id)}
+                className="text-slate-300 hover:text-red-500 transition-colors p-2"
+              >
+                <UserMinus size={18} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
 
       {/* Database Configuration */}
       <section className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm space-y-6">
@@ -876,19 +1200,66 @@ function AdminView({ state, setState, dbConfig, onSaveConfig, onSetupDb, onGener
           </button>
         </div>
 
-        <div className="space-y-3 pt-4">
+        <div className="space-y-4 pt-4">
           {state.categories.map(cat => (
-            <div key={cat.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-              <div className="flex items-center gap-4">
-                <div className="w-4 h-4 rounded-full" style={{ backgroundColor: cat.color }} />
-                <div>
-                  <span className="font-bold text-slate-800">{cat.name}</span>
-                  <span className="ml-2 text-xs font-bold text-slate-400 uppercase tracking-widest">({cat.prefix})</span>
+            <div key={cat.id} className="space-y-3 p-6 bg-slate-50 rounded-[32px] border border-slate-100">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-4 h-4 rounded-full" style={{ backgroundColor: cat.color }} />
+                  <div>
+                    <span className="font-bold text-slate-800 text-lg">{cat.name}</span>
+                    <span className="ml-2 text-xs font-bold text-slate-400 uppercase tracking-widest">({cat.prefix})</span>
+                  </div>
+                </div>
+                <button onClick={() => removeCategory(cat.id)} className="text-slate-300 hover:text-red-500 transition-colors p-2">
+                  <Trash2 size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-3 pl-8">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Sub-categorías (Tipificaciones)</h4>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {cat.subCategories?.map(sub => (
+                    <div key={sub.id} className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600">
+                      {sub.name}
+                      <button 
+                        onClick={() => {
+                          setState(prev => ({
+                            ...prev,
+                            categories: prev.categories.map(c => c.id === cat.id ? {
+                              ...c,
+                              subCategories: c.subCategories?.filter(s => s.id !== sub.id)
+                            } : c)
+                          }));
+                        }}
+                        className="text-slate-300 hover:text-red-400"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  <button 
+                    onClick={() => {
+                      const name = prompt('Nombre de la sub-categoría:');
+                      if (name) {
+                        setState(prev => ({
+                          ...prev,
+                          categories: prev.categories.map(c => c.id === cat.id ? {
+                            ...c,
+                            subCategories: [...(c.subCategories || []), { id: crypto.randomUUID(), name }]
+                          } : c)
+                        }));
+                      }
+                    }}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-dashed border-slate-300 text-sm font-bold text-slate-400 hover:border-blue-400 hover:text-blue-500 transition-all"
+                  >
+                    <Plus size={14} />
+                    Añadir
+                  </button>
                 </div>
               </div>
-              <button onClick={() => removeCategory(cat.id)} className="text-slate-300 hover:text-red-500 transition-colors">
-                <Trash2 size={18} />
-              </button>
             </div>
           ))}
         </div>
@@ -904,10 +1275,20 @@ function AdminView({ state, setState, dbConfig, onSaveConfig, onSetupDb, onGener
         <div className="flex flex-wrap gap-4">
           <button 
             onClick={onGenerateSynth}
-            className="px-6 py-3 bg-purple-50 text-purple-700 border border-purple-100 rounded-xl font-bold hover:bg-purple-100 transition-all flex items-center gap-2"
+            disabled={isSyncing}
+            className="px-6 py-3 bg-purple-50 text-purple-700 border border-purple-100 rounded-xl font-bold hover:bg-purple-100 transition-all flex items-center gap-2 disabled:opacity-50"
           >
-            <Plus size={20} />
-            Generar 6 meses de datos sintéticos
+            {isSyncing ? (
+              <>
+                <div className="w-4 h-4 border-2 border-purple-700 border-t-transparent rounded-full animate-spin" />
+                Sincronizando con DB...
+              </>
+            ) : (
+              <>
+                <Plus size={20} />
+                Generar 6 meses de datos sintéticos
+              </>
+            )}
           </button>
           <button 
             onClick={onClear}
@@ -923,105 +1304,7 @@ function AdminView({ state, setState, dbConfig, onSaveConfig, onSetupDb, onGener
 }
 
 function AnalyticsView({ tickets, categories }: { tickets: Ticket[], categories: Category[], key?: React.Key }) {
-  const stats = useMemo(() => {
-    const completed = tickets.filter(t => t.status === 'completed');
-    const noShows = tickets.filter(t => t.status === 'no-show');
-    
-    const tme = completed.reduce((acc, t) => acc + ((t.calledAt || 0) - t.createdAt), 0) / (completed.length || 1);
-    const tma = completed.reduce((acc, t) => acc + ((t.completedAt || 0) - (t.startedAt || t.calledAt || 0)), 0) / (completed.length || 1);
-    
-    const abandonmentRate = (noShows.length / (tickets.length || 1)) * 100;
-
-    // Volume by day (last 30 days)
-    const last30Days = Array.from({ length: 30 }, (_, i) => {
-      const date = subDays(new Date(), i);
-      const start = startOfDay(date).getTime();
-      const end = start + 24 * 60 * 60 * 1000;
-      const count = tickets.filter(t => t.createdAt >= start && t.createdAt < end).length;
-      return { date: format(date, 'dd/MM'), count };
-    }).reverse();
-
-    // Volume by category
-    const categoryData = categories.map(cat => ({
-      name: cat.name,
-      value: tickets.filter(t => t.categoryId === cat.id).length,
-      color: cat.color
-    }));
-
-    return {
-      tme: Math.round(tme / 60000),
-      tma: Math.round(tma / 60000),
-      total: tickets.length,
-      abandonmentRate: Math.round(abandonmentRate),
-      last30Days,
-      categoryData
-    };
-  }, [tickets, categories]);
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="p-6 md:p-10 max-w-7xl mx-auto space-y-8"
-    >
-      <header>
-        <h1 className="text-3xl font-bold text-slate-900">Analytics & KPIs</h1>
-        <p className="text-slate-500">Monitoreo de desempeño y flujo de atención</p>
-      </header>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <KPICard label="T. Medio Espera" value={`${stats.tme} min`} icon={<Clock className="text-blue-500" />} trend="+2% vs ayer" />
-        <KPICard label="T. Medio Atención" value={`${stats.tma} min`} icon={<CheckCircle2 className="text-green-500" />} trend="-5% vs ayer" />
-        <KPICard label="Total Turnos" value={stats.total.toLocaleString()} icon={<Users className="text-purple-500" />} trend="+12% vs mes ant." />
-        <KPICard label="Tasa Abandono" value={`${stats.abandonmentRate}%`} icon={<Trash2 className="text-red-500" />} trend="Estable" />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Main Chart */}
-        <div className="lg:col-span-2 bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm space-y-6">
-          <h3 className="text-xl font-bold">Volumen de Turnos (Últimos 30 días)</h3>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={stats.last30Days}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                <Tooltip 
-                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                />
-                <Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={3} dot={false} activeDot={{ r: 6, strokeWidth: 0 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Category Distribution */}
-        <div className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm space-y-6">
-          <h3 className="text-xl font-bold">Distribución por Trámite</h3>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={stats.categoryData}
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {stats.categoryData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend verticalAlign="bottom" height={36}/>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  );
+  return null;
 }
 
 function KPICard({ label, value, icon, trend }: { label: string, value: string | number, icon: React.ReactNode, trend: string }) {

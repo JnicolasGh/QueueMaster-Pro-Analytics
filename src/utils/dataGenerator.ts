@@ -38,10 +38,20 @@ export function generateSyntheticData(categories: Category[]): Ticket[] {
       // Abandonment rate: ~10%
       const isNoShow = Math.random() < 0.1;
 
+      // Random document (8 digits)
+      const customerDocument = Math.floor(10000000 + Math.random() * 90000000).toString();
+      
+      // Random sub-category if available
+      const subCategoryId = category.subCategories && category.subCategories.length > 0
+        ? category.subCategories[Math.floor(Math.random() * category.subCategories.length)].id
+        : undefined;
+
       tickets.push({
         id: `synth-${currentId}`,
         displayId: `${category.prefix}${String(currentId % 1000).padStart(3, '0')}`,
         categoryId: category.id,
+        subCategoryId,
+        customerDocument,
         status: isNoShow ? 'no-show' : 'completed',
         createdAt: arrivalTime,
         calledAt: calledAt,

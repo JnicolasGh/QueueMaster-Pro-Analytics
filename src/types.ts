@@ -1,5 +1,13 @@
 
 export type TicketStatus = 'waiting' | 'calling' | 'serving' | 'completed' | 'no-show';
+export type UserRole = 'kiosk' | 'display' | 'advisor' | 'admin';
+
+export interface User {
+  id: string;
+  username: string;
+  role: UserRole;
+  name: string;
+}
 
 export interface Category {
   id: string;
