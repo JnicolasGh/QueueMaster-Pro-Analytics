@@ -228,7 +228,7 @@ function KioskView({ categories, onIssue }: { categories: Category[], onIssue: (
   const handleIssue = (id: string) => {
     const ticket = (onIssue as any)(id);
     setLastTicket(ticket);
-    setTimeout(() => setLastTicket(null), 5000);
+    setTimeout(() => setLastTicket(null), 1000);
   };
 
   return (
