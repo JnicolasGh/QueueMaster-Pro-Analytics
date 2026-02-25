@@ -1,0 +1,16 @@
+services:
+  queuemaster-postgres:
+    image: postgres:16
+    container_name: queuemaster-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: queuemaster
+      POSTGRES_PASSWORD: queuemaster123
+      POSTGRES_DB: queuemaster_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - queuemaster_pgdata:/var/lib/postgresql/data
+
+volumes:
+  queuemaster_pgdata:
