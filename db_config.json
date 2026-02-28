@@ -1,1 +1,4 @@
-{"usePostgres":true,"connectionString":"postgres://queuemaster:queuemaster123@localhost:5432/queuemaster_db?sslmode=disable"}
+{
+  "usePostgres": true,
+  "connectionString": "postgres://queuemaster:queuemaster123@localhost:5432/queuemaster_db?sslmode=disable"
+}

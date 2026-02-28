@@ -25,10 +25,7 @@ import {
   UserMinus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend 
-} from 'recharts';
-import { format, differenceInMinutes, startOfDay, subDays, isWithinInterval } from 'date-fns';
+import { format } from 'date-fns';
 import { Category, Counter, Ticket, AppState, TicketStatus, User, UserRole } from './types';
 import { generateSyntheticData } from './utils/dataGenerator';
 
@@ -36,6 +33,7 @@ import { generateSyntheticData } from './utils/dataGenerator';
 const DEFAULT_CATEGORIES: Category[] = [
   { 
     id: '1', name: 'Servicio al Cliente', prefix: 'S', color: '#3b82f6',
+    priority: 1,
     subCategories: [
       { id: '1-1', name: 'sub_servicio_1' },
       { id: '1-2', name: 'sub_servicio_2' },
@@ -44,6 +42,7 @@ const DEFAULT_CATEGORIES: Category[] = [
   },
   { 
     id: '2', name: 'Preferencial', prefix: 'P', color: '#ef4444',
+    priority: 3,
     subCategories: [
       { id: '2-1', name: 'sub_preferencial_1' },
       { id: '2-2', name: 'sub_preferencial_2' },
@@ -52,6 +51,7 @@ const DEFAULT_CATEGORIES: Category[] = [
   },
   { 
     id: '3', name: 'Caja y Pagos', prefix: 'C', color: '#10b981',
+    priority: 1,
     subCategories: [
       { id: '3-1', name: 'sub_caja_1' },
       { id: '3-2', name: 'sub_caja_2' },
@@ -60,6 +60,7 @@ const DEFAULT_CATEGORIES: Category[] = [
   },
   { 
     id: '4', name: 'Asesoría Comercial', prefix: 'A', color: '#8b5cf6',
+    priority: 1,
     subCategories: [
       { id: '4-1', name: 'sub_comercial_1' },
       { id: '4-2', name: 'sub_comercial_2' },
@@ -87,11 +88,19 @@ export default function App() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      // Migration: Ensure all categories have subCategories array
-      parsed.categories = parsed.categories.map((c: any) => ({
-        ...c,
-        subCategories: c.subCategories || []
-      }));
+      // Migration: Ensure all categories have subCategories array and restore defaults if missing for base categories
+      parsed.categories = parsed.categories.map((c: any) => {
+        const defaultCat = DEFAULT_CATEGORIES.find(dc => dc.id === c.id);
+        const subCategories = (c.subCategories && c.subCategories.length > 0) 
+          ? c.subCategories 
+          : (defaultCat?.subCategories || []);
+        
+        return {
+          ...c,
+          subCategories,
+          priority: c.priority || defaultCat?.priority || 1
+        };
+      });
       return parsed;
     }
     return {
@@ -176,9 +185,15 @@ export default function App() {
       .sort((a, b) => {
         const catA = state.categories.find(c => c.id === a.categoryId);
         const catB = state.categories.find(c => c.id === b.categoryId);
-        if (catA?.prefix === 'P' && catB?.prefix !== 'P') return -1;
-        if (catA?.prefix !== 'P' && catB?.prefix === 'P') return 1;
-        return a.createdAt - b.createdAt;
+        
+        const priorityA = catA?.priority || 1;
+        const priorityB = catB?.priority || 1;
+
+        if (priorityA !== priorityB) {
+          return priorityB - priorityA; // Higher priority first
+        }
+        
+        return a.createdAt - b.createdAt; // Then by arrival time
       });
 
     if (waitingTickets.length === 0) return;
@@ -330,22 +345,22 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row font-sans text-slate-900">
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-2 flex justify-around items-center z-50 md:relative md:border-t-0 md:border-r md:w-20 md:flex-col md:h-screen md:py-8">
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-2 flex justify-around items-center z-50 md:sticky md:top-0 md:border-t-0 md:border-r md:w-20 md:flex-col md:h-screen md:py-8">
         <div className="hidden md:flex flex-col items-center gap-4 mb-8">
           <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-100">
             <TicketIcon size={20} />
           </div>
         </div>
 
-        <div className="flex flex-row md:flex-col gap-2 md:gap-6">
+        <div className="flex flex-row md:flex-col flex-1 gap-2 md:gap-6">
           {allowedViews.includes('kiosk') && (
-            <NavButton icon={<Monitor size={24} />} label="Kiosco" active={view === 'kiosk'} onClick={() => setView('kiosk')} />
+            <NavButton icon={<TicketIcon size={24} />} label="Kiosco" active={view === 'kiosk'} onClick={() => setView('kiosk')} />
           )}
           {allowedViews.includes('advisor') && (
             <NavButton icon={<UserRound size={24} />} label="Asesor" active={view === 'advisor'} onClick={() => setView('advisor')} />
           )}
           {allowedViews.includes('tv') && (
-            <NavButton icon={<Volume2 size={24} />} label="TV" active={view === 'tv'} onClick={() => setView('tv')} />
+            <NavButton icon={<Monitor size={24} />} label="TV" active={view === 'tv'} onClick={() => setView('tv')} />
           )}
           {allowedViews.includes('admin') && (
             <NavButton icon={<Settings size={24} />} label="Admin" active={view === 'admin'} onClick={() => setView('admin')} />
@@ -405,6 +420,7 @@ function LoginView({ onLogin }: { onLogin: (user: User) => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const passwordRef = React.useRef<HTMLInputElement>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -428,6 +444,14 @@ function LoginView({ onLogin }: { onLogin: (user: User) => void }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleErrorDismiss = () => {
+    setError('');
+    setPassword('');
+    setTimeout(() => {
+      passwordRef.current?.focus();
+    }, 100);
   };
 
   return (
@@ -468,6 +492,7 @@ function LoginView({ onLogin }: { onLogin: (user: User) => void }) {
                 <input 
                   type="password" 
                   required
+                  ref={passwordRef}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium"
@@ -477,15 +502,37 @@ function LoginView({ onLogin }: { onLogin: (user: User) => void }) {
             </div>
           </div>
 
-          {error && (
-            <motion.p 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="text-red-500 text-sm font-bold text-center bg-red-50 py-3 rounded-xl border border-red-100"
-            >
-              {error}
-            </motion.p>
-          )}
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-6"
+              >
+                <motion.div
+                  initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                  animate={{ scale: 1, opacity: 1, y: 0 }}
+                  exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                  className="bg-white rounded-[32px] p-8 shadow-2xl max-w-sm w-full text-center space-y-6 border border-slate-100"
+                >
+                  <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto">
+                    <Lock size={32} />
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-xl font-bold text-slate-900">Acceso Denegado</h3>
+                    <p className="text-slate-500 text-sm leading-relaxed">{error}</p>
+                  </div>
+                  <button
+                    onClick={handleErrorDismiss}
+                    className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all"
+                  >
+                    Entendido
+                  </button>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <button 
             type="submit"
@@ -513,19 +560,30 @@ function LoginView({ onLogin }: { onLogin: (user: User) => void }) {
   );
 }
 
-function KioskView({ categories, onIssue }: { categories: Category[], onIssue: (id: string, doc?: string) => void, key?: React.Key }) {
+function KioskView({ categories, onIssue }: { categories: Category[], onIssue: (id: string, doc?: string) => Ticket | undefined, key?: React.Key }) {
   const [lastTicket, setLastTicket] = useState<Ticket | null>(null);
   const [document, setDocument] = useState('');
+  const [docType, setDocType] = useState('CC');
   const [step, setStep] = useState<'id' | 'category'>('id');
 
   const handleIssue = (id: string) => {
-    const ticket = (onIssue as any)(id, document);
-    setLastTicket(ticket);
-    setTimeout(() => {
-      setLastTicket(null);
-      setStep('id');
-      setDocument('');
-    }, 2000);
+    const fullDoc = `${docType} ${document}`;
+    const ticket = onIssue(id, fullDoc);
+    if (ticket) {
+      setLastTicket(ticket);
+      setTimeout(() => {
+        setLastTicket(null);
+        setStep('id');
+        setDocument('');
+        setDocType('CC');
+      }, 2000);
+    }
+  };
+
+  const handleDocChange = (val: string) => {
+    // Only allow numbers
+    const numericValue = val.replace(/[^0-9]/g, '');
+    setDocument(numericValue);
   };
 
   return (
@@ -548,15 +606,34 @@ function KioskView({ categories, onIssue }: { categories: Category[], onIssue: (
 
         {step === 'id' ? (
           <div className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm space-y-6 max-w-md mx-auto">
-            <input 
-              type="text" 
-              placeholder="Número de Documento" 
-              className="w-full px-6 py-4 text-2xl font-bold rounded-2xl border border-slate-200 focus:ring-4 focus:ring-blue-100 outline-none text-center"
-              value={document}
-              onChange={e => setDocument(e.target.value)}
-            />
+            <div className="flex gap-2">
+              {['CC', 'CE', 'TI'].map(type => (
+                <button
+                  key={type}
+                  onClick={() => setDocType(type)}
+                  className={`flex-1 py-3 rounded-xl font-bold transition-all border ${
+                    docType === type 
+                      ? 'bg-blue-600 border-blue-600 text-white shadow-md' 
+                      : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'
+                  }`}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+            <div className="space-y-2">
+              <input 
+                type="text" 
+                inputMode="numeric"
+                placeholder="Número de Documento" 
+                className="w-full px-6 py-4 text-2xl font-bold rounded-2xl border border-slate-200 focus:ring-4 focus:ring-blue-100 outline-none text-center"
+                value={document}
+                onChange={e => handleDocChange(e.target.value)}
+              />
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Solo se permiten números</p>
+            </div>
             <button 
-              disabled={!document}
+              disabled={!document || document.length < 5}
               onClick={() => setStep('category')}
               className="w-full bg-blue-600 text-white font-bold py-4 rounded-2xl hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2 text-xl"
             >
@@ -851,13 +928,6 @@ function TVView({ tickets, counters }: { tickets: Ticket[], counters: Counter[],
 
   const lastCalled = callingTickets[0];
 
-  // Sound effect simulation (visual only in this context)
-  useEffect(() => {
-    if (lastCalled?.status === 'calling') {
-      // In a real app: new Audio('/ding.mp3').play();
-    }
-  }, [lastCalled?.id]);
-
   return (
     <motion.div 
       initial={{ opacity: 0 }}
@@ -980,7 +1050,7 @@ function AdminView({ state, setState, dbConfig, isSyncing, onSaveConfig, onSetup
   onClear: () => void,
   key?: React.Key
 }) {
-  const [newCat, setNewCat] = useState({ name: '', prefix: '', color: '#3b82f6' });
+  const [newCat, setNewCat] = useState({ name: '', prefix: '', color: '#3b82f6', priority: 1 });
   const [localDbConfig, setLocalDbConfig] = useState(dbConfig);
   const [users, setUsers] = useState<User[]>([]);
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'advisor' as UserRole, name: '' });
@@ -1028,7 +1098,7 @@ function AdminView({ state, setState, dbConfig, isSyncing, onSaveConfig, onSetup
       categories: [...prev.categories, { ...newCat, id, subCategories }],
       nextTicketNumber: { ...prev.nextTicketNumber, [id]: 1 }
     }));
-    setNewCat({ name: '', prefix: '', color: '#3b82f6' });
+    setNewCat({ name: '', prefix: '', color: '#3b82f6', priority: 1 });
   };
 
   const removeCategory = (id: string) => {
@@ -1175,7 +1245,7 @@ function AdminView({ state, setState, dbConfig, isSyncing, onSaveConfig, onSetup
           Categorías de Trámites
         </h3>
         
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
           <input 
             type="text" 
             placeholder="Nombre (ej. Caja)" 
@@ -1191,6 +1261,17 @@ function AdminView({ state, setState, dbConfig, isSyncing, onSaveConfig, onSetup
             value={newCat.prefix}
             onChange={e => setNewCat({ ...newCat, prefix: e.target.value.toUpperCase() })}
           />
+          <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-slate-200">
+            <label className="text-xs font-bold text-slate-400 uppercase">Peso:</label>
+            <input 
+              type="number" 
+              min="1" 
+              max="10"
+              className="w-full outline-none font-bold text-blue-600"
+              value={newCat.priority}
+              onChange={e => setNewCat({ ...newCat, priority: parseInt(e.target.value) || 1 })}
+            />
+          </div>
           <button 
             onClick={addCategory}
             className="bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
@@ -1211,9 +1292,28 @@ function AdminView({ state, setState, dbConfig, isSyncing, onSaveConfig, onSetup
                     <span className="ml-2 text-xs font-bold text-slate-400 uppercase tracking-widest">({cat.prefix})</span>
                   </div>
                 </div>
-                <button onClick={() => removeCategory(cat.id)} className="text-slate-300 hover:text-red-500 transition-colors p-2">
-                  <Trash2 size={20} />
-                </button>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200">
+                    <span className="text-[10px] font-black uppercase text-slate-400">Prioridad:</span>
+                    <input 
+                      type="number" 
+                      min="1" 
+                      max="10"
+                      className="w-10 text-center font-bold text-blue-600 outline-none"
+                      value={cat.priority}
+                      onChange={e => {
+                        const priority = parseInt(e.target.value) || 1;
+                        setState(prev => ({
+                          ...prev,
+                          categories: prev.categories.map(c => c.id === cat.id ? { ...c, priority } : c)
+                        }));
+                      }}
+                    />
+                  </div>
+                  <button onClick={() => removeCategory(cat.id)} className="text-slate-300 hover:text-red-500 transition-colors p-2">
+                    <Trash2 size={20} />
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-3 pl-8">
@@ -1268,9 +1368,9 @@ function AdminView({ state, setState, dbConfig, isSyncing, onSaveConfig, onSetup
       <section className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm space-y-6">
         <h3 className="text-xl font-bold flex items-center gap-2">
           <LayoutDashboard className="text-purple-500" />
-          Gestión de Datos
+          Gestión de Datos Operativos
         </h3>
-        <p className="text-slate-500 text-sm">Utilice estas herramientas para poblar el sistema con datos de prueba o limpiar el historial.</p>
+        <p className="text-slate-500 text-sm">Herramientas para mantenimiento y pruebas del sistema.</p>
         
         <div className="flex flex-wrap gap-4">
           <button 
@@ -1286,7 +1386,7 @@ function AdminView({ state, setState, dbConfig, isSyncing, onSaveConfig, onSetup
             ) : (
               <>
                 <Plus size={20} />
-                Generar 6 meses de datos sintéticos
+                Generar Datos de Prueba (Auditoría)
               </>
             )}
           </button>
@@ -1295,8 +1395,12 @@ function AdminView({ state, setState, dbConfig, isSyncing, onSaveConfig, onSetup
             className="px-6 py-3 bg-red-50 text-red-700 border border-red-100 rounded-xl font-bold hover:bg-red-100 transition-all flex items-center gap-2"
           >
             <Trash2 size={20} />
-            Borrar todo el historial
+            Limpiar Historial Local
           </button>
+        </div>
+        <div className="pt-6 border-t border-slate-100 flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-300">
+          <span>QueueMaster Pro - Versión Definitiva</span>
+          <span>v1.0.0 - 2024</span>
         </div>
       </section>
     </motion.div>
@@ -1305,21 +1409,4 @@ function AdminView({ state, setState, dbConfig, isSyncing, onSaveConfig, onSetup
 
 function AnalyticsView({ tickets, categories }: { tickets: Ticket[], categories: Category[], key?: React.Key }) {
   return null;
-}
-
-function KPICard({ label, value, icon, trend }: { label: string, value: string | number, icon: React.ReactNode, trend: string }) {
-  return (
-    <div className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center">
-          {icon}
-        </div>
-        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{trend}</span>
-      </div>
-      <div>
-        <p className="text-slate-500 text-sm font-medium">{label}</p>
-        <h4 className="text-3xl font-black text-slate-900 tracking-tight">{value}</h4>
-      </div>
-    </div>
-  );
 }

@@ -3,6 +3,7 @@ import { createServer as createViteServer } from "vite";
 import { Pool } from "pg";
 import path from "path";
 import fs from "fs";
+import crypto from "node:crypto";
 
 const app = express();
 const PORT = 3000;
@@ -118,21 +119,35 @@ initPool().catch(err => console.error("Initial DB pool setup failed:", err));
 // API Routes
 app.post("/api/auth/login", async (req, res) => {
   const { username, password } = req.body;
+  const normalizedUsername = username?.toLowerCase();
+  console.log(`Login attempt for user: ${normalizedUsername}`);
   if (pool) {
     try {
-      const result = await pool.query("SELECT id, username, role, name FROM users WHERE username = $1 AND password = $2", [username, password]);
+      const result = await pool.query(
+        "SELECT id, username, role, name FROM users WHERE LOWER(username) = $1 AND password = $2", 
+        [normalizedUsername, password]
+      );
       if (result.rows.length > 0) {
+        console.log(`Login successful for: ${normalizedUsername}`);
         res.json(result.rows[0]);
       } else {
+        console.log(`Login failed for: ${normalizedUsername} - Invalid credentials`);
         res.status(401).json({ error: "Credenciales inválidas" });
       }
     } catch (err) {
+      console.error(`Login error for ${normalizedUsername}:`, err);
       res.status(500).json({ error: (err as Error).message });
     }
   } else {
     // Simple mock for local testing without DB
-    if (username === 'admin' && password === 'admin123') {
+    if (normalizedUsername === 'admin' && password === 'admin123') {
       res.json({ id: 'u1', username: 'admin', role: 'admin', name: 'Admin Local' });
+    } else if (normalizedUsername === 'kiosco' && password === 'kiosco123') {
+      res.json({ id: 'u2', username: 'kiosco', role: 'kiosk', name: 'Kiosco Local' });
+    } else if (normalizedUsername === 'asesor1' && password === 'asesor123') {
+      res.json({ id: 'u4', username: 'asesor1', role: 'advisor', name: 'Asesor Local' });
+    } else if (normalizedUsername === 'pantalla' && password === 'pantalla123') {
+      res.json({ id: 'u3', username: 'pantalla', role: 'display', name: 'Pantalla Local' });
     } else {
       res.status(401).json({ error: "Postgres no conectado y credenciales inválidas" });
     }
@@ -324,6 +339,9 @@ app.post("/api/setup-db", async (req, res) => {
 });
 
 async function startServer() {
+  await initPool();
+  await initDb();
+  
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

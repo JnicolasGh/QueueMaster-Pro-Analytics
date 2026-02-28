@@ -14,6 +14,7 @@ export interface Category {
   name: string;
   prefix: string;
   color: string;
+  priority: number;
   subCategories?: SubCategory[];
 }
 
