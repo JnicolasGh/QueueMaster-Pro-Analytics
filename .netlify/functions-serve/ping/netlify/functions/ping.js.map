@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": ["../../../../Documents/Maestria/Segundo Semestre/Computaci%C3%B3n en la nube/QueueMaster-Pro-Analytics/netlify/functions/ping.js"],
+  "sourceRoot": "C:/Users/jnico/AppData/Local/Temp/tmp-30964-fAmjqEUi9SmO",
+  "sourcesContent": ["export const handler = async () => {\r\n  return { statusCode: 200, body: \"pong\" };\r\n};"],
+  "mappings": ";;;;;;;;;;;;;;;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AAAO,IAAM,UAAU,YAAY;AACjC,SAAO,EAAE,YAAY,KAAK,MAAM,OAAO;AACzC;",
+  "names": []
+}

@@ -33,10 +33,57 @@ Sistema profesional de gestión de turnos con análisis de datos en tiempo real,
    npm run dev
    ```
 
-## 📊 Datos Sintéticos
-Para probar el dashboard de analytics inmediatamente:
-1. Ve a la sección **Admin** (icono de engranaje).
-2. Haz clic en **"Generar 6 meses de datos sintéticos"**.
-3. Ve a la sección **Analytics** para ver los resultados.
+## Docker (App + PostgreSQL)
 
+1. Construir y levantar contenedores:
+   ```bash
+   docker compose up --build
+   ```
+2. Aplicacion disponible en:
+   - `http://localhost:3000`
+3. Base de datos PostgreSQL:
+   - Host: `localhost`
+   - Puerto: `5432`
+   - DB: `queuemaster_db`
+   - User: `queuemaster`
+   - Password: `queuemaster123`
 
+### Cargar copia de base de datos (opcional)
+
+La restauracion automatica solo ocurre cuando el volumen de PostgreSQL se crea por primera vez.
+
+1. Copia tu backup en `infra/postgres/backups/` (formatos soportados: `.sql`, `.dump`, `.backup`).
+2. En `docker-compose.yml`, en el servicio `queuemaster-postgres`, asigna:
+   - `POSTGRES_RESTORE_FILE: "tu_archivo.sql"` (o `.dump`)
+3. Levanta contenedores:
+   ```bash
+   docker compose up --build
+   ```
+
+Si el volumen ya existe y quieres restaurar desde cero:
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+## 🏗️ Arquitectura Lakehouse (Implementación)
+
+El sistema utiliza un flujo de datos en capas dentro de PostgreSQL para optimizar la analítica:
+
+### 1. Capa Raw (Operativa)
+- **Origen**: Aplicación Node.js.
+- **Tabla**: `tickets`.
+- **Contenido**: Datos crudos tal como se generan en el kiosco y la ventanilla.
+
+### 2. Capa Bronze (Limpieza)
+- **Proceso**: `make run-raw-to-bronze`.
+- **Acción**: Convierte timestamps a fechas reales, separa tipos de documento y calcula tiempos en segundos.
+- **Tabla**: `bronze_tickets`.
+
+### 3. Capa Silver (Métricas)
+- **Proceso**: `make run-bronze-to-silver`.
+- **Acción**: Agrupa datos por día y calcula KPIs (TME, TMA, Tasa de Abandono).
+- **Tabla**: `silver_daily_metrics`.
+
+### 4. Visualización (Grafana)
+- Conecte Grafana a PostgreSQL y use la tabla `silver_daily_metrics` para dashboards de alto rendimiento.

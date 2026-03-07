@@ -1,4 +1,19 @@
 services:
+  queuemaster-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: queuemaster-app
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://queuemaster:queuemaster123@queuemaster-postgres:5432/queuemaster_db
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      queuemaster-postgres:
+        condition: service_healthy
+
   queuemaster-postgres:
     image: postgres:16
     container_name: queuemaster-postgres
@@ -7,10 +22,20 @@ services:
       POSTGRES_USER: queuemaster
       POSTGRES_PASSWORD: queuemaster123
       POSTGRES_DB: queuemaster_db
+      # Optional: set to a file inside ./infra/postgres/backups (e.g. backup.sql or backup.dump)
+      POSTGRES_RESTORE_FILE: ""
     ports:
       - "5432:5432"
     volumes:
       - queuemaster_pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init_schema.sql:/docker-entrypoint-initdb.d/10_init_schema.sql:ro
+      - ./infra/postgres/restore.sh:/docker-entrypoint-initdb.d/20_restore.sh:ro
+      - ./infra/postgres/backups:/backups:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U queuemaster -d queuemaster_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   queuemaster_pgdata:

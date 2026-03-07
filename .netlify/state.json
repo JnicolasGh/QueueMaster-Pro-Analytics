@@ -1,0 +1,21 @@
+{
+	"siteId": "5330bf50-895c-4e9a-b1c8-99fc1bef832d",
+	"geolocation": {
+		"data": {
+			"city": "Chía",
+			"country": {
+				"code": "CO",
+				"name": "Colombia"
+			},
+			"subdivision": {
+				"code": "CUN",
+				"name": "Cundinamarca"
+			},
+			"timezone": "America/Bogota",
+			"latitude": 4.8588,
+			"longitude": -74.0553,
+			"postalCode": "250001"
+		},
+		"timestamp": 1772297476361
+	}
+}

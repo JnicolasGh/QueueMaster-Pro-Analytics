@@ -1,0 +1,10 @@
+name: queuemaster-pro
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pandas
+  - psycopg2
+  - sqlalchemy
+  - python-dotenv

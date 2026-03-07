@@ -4,3 +4,5 @@ docker run --name queuemaster-postgres `
   -e POSTGRES_DB=queuemaster_db `
   -p 5432:5432 `
   -d postgres:16
+
+  queuemaster_db$
